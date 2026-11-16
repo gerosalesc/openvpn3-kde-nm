@@ -1,0 +1,13 @@
+[Unit]
+Description=OpenVPN 3 KDE Connection Manager Synchronization & WebAuth Service
+After=graphical-session.target dbus.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 %h/.local/bin/openvpn3-kde-sync
+Restart=on-failure
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
