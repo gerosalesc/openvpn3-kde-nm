@@ -1,6 +1,6 @@
 # OpenVPN 3 KDE Connection Manager Integration (`openvpn3-kde-nm`)
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Platform: Linux / KDE Plasma](https://img.shields.io/badge/platform-Linux%20%7C%20KDE%20Plasma-informational.svg)](https://kde.org/)
@@ -96,7 +96,16 @@ flowchart TB
 
 ## Installation
 
-Clone the repository and run the installer script:
+### Option 1: Install from PyPI (via `pipx`)
+
+Because `openvpn3`, `gi` (PyGObject), and `dbus` come from system packages (`/usr/lib/python3/dist-packages/`), install with `--system-site-packages` and then run `openvpn3-kde-cli install` to register the systemd user daemon and NetworkManager root plugin hook:
+
+```bash
+pipx install --system-site-packages openvpn3-kde-nm
+openvpn3-kde-cli install
+```
+
+### Option 2: Install from Source
 
 ```bash
 git clone git@github.com:gerosalesc/openvpn3-kde-nm.git
@@ -104,11 +113,10 @@ cd openvpn3-kde-nm
 ./install.sh
 ```
 
-### What `install.sh` Does
-1. Symlinks `openvpn3-kde-cli` and `openvpn3-kde-sync` into `~/.local/bin/`.
-2. Installs and enables the user systemd service `~/.config/systemd/user/openvpn3-kde-sync.service`.
-3. Synchronizes your existing `openvpn3` configurations (`openvpn3 configs-list`) with KDE Connection Manager.
-4. Uses PolicyKit (`pkexec`) or `sudo` to:
+### What `openvpn3-kde-cli install` / `./install.sh` Does
+1. Installs and enables the user systemd service `~/.config/systemd/user/openvpn3-kde-sync.service`.
+2. Synchronizes your existing `openvpn3` configurations (`openvpn3 configs-list`) with KDE Connection Manager.
+3. Uses PolicyKit (`pkexec`) or `sudo` to:
    - Install the Python package to `/usr/local/lib/openvpn3-kde-nm` (so NetworkManager can execute it inside its `ProtectHome=read-only` systemd sandbox).
    - Back up `/usr/libexec/nm-openvpn-service` and `/usr/lib/NetworkManager/VPN/nm-openvpn-service.name` to `/var/backups/`.
    - Register `/usr/local/libexec/nm-openvpn3-service` as NetworkManager's OpenVPN service plugin.
@@ -142,6 +150,12 @@ openvpn3-kde-cli sync
 # Import a new .ovpn file into both OpenVPN 3 and KDE Connections
 openvpn3-kde-cli import /path/to/profile.ovpn --name MyVPN
 
+# Register / update NetworkManager hook and systemd daemon
+openvpn3-kde-cli install
+
+# Remove NetworkManager hook and restore OpenVPN 2
+openvpn3-kde-cli uninstall
+
 # Display version
 openvpn3-kde-cli --version
 ```
@@ -153,8 +167,11 @@ openvpn3-kde-cli --version
 To remove the integration and restore the original OpenVPN 2 NetworkManager service:
 
 ```bash
-./uninstall.sh
+openvpn3-kde-cli uninstall
 ```
+*(Or `./uninstall.sh` from the source checkout.)*
+
+If installed via `pipx`, you can also remove the package afterwards with `pipx uninstall openvpn3-kde-nm`.
 
 ---
 
@@ -167,9 +184,12 @@ openvpn3-kde-nm/
 │   ├── openvpn3-kde-cli             # CLI management utility
 │   └── openvpn3-kde-sync            # User session sync & WebAuth daemon
 ├── openvpn3_kde_nm/
+│   ├── data/
+│   │   └── openvpn3-kde-sync.service # Bundled systemd user unit template
 │   ├── __init__.py                  # Package version metadata
-│   ├── cli.py                       # CLI implementation (status, stats, logs, sync, import)
+│   ├── cli.py                       # CLI implementation (status, stats, logs, sync, import, install, uninstall)
 │   ├── config_sync.py               # Bidirectional OpenVPN 3 <-> NetworkManager sync
+│   ├── installer.py                 # Self-contained installer & uninstaller logic
 │   ├── nm_vpn_service.py            # NM.VpnServicePlugin D-Bus implementation
 │   ├── ovpn_parser.py               # .ovpn parser, PEM extractor, X.509 CN recovery
 │   └── session_watcher.py           # Session event watcher & WebAuth handler

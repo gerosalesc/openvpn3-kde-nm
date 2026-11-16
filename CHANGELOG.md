@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-11-16
+
+### Added
+- **PyPI Packaging Support**:
+  - Updated `pyproject.toml` to use `setuptools>=77.0.0`, SPDX license expression (`MIT`), explicit `[tool.setuptools.packages.find]`, and `[tool.setuptools.package-data]` so `uv build` / `python -m build` produce clean source distributions and wheels with zero warnings.
+  - Added `openvpn3_kde_nm/installer.py` and bundled `openvpn3_kde_nm/data/openvpn3-kde-sync.service` as package data.
+  - Added `openvpn3-kde-cli install` and `openvpn3-kde-cli uninstall` subcommands so PyPI / `pipx` installations are completely self-contained without needing a git clone.
+  - Documented `pipx install --system-site-packages openvpn3-kde-nm` in `README.md`.
+
+### Changed
+- Refactored `install.sh` and `uninstall.sh` to delegate directly to `openvpn3-kde-cli install` and `openvpn3-kde-cli uninstall`.
+
 ## [1.0.0] - 2026-11-16
 
 ### Added

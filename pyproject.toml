@@ -1,14 +1,15 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=77.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "openvpn3-kde-nm"
-version = "1.0.0"
+version = "1.1.0"
 description = "Native KDE Connection Manager (plasma-nm / NetworkManager) integration for OpenVPN 3 Linux"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "German Rosales", email = "rosalesgermane@gmail.com" }
 ]
@@ -18,7 +19,6 @@ classifiers = [
     "Environment :: X11 Applications :: KDE",
     "Intended Audience :: End Users/Desktop",
     "Intended Audience :: System Administrators",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
@@ -37,3 +37,9 @@ Changelog = "https://github.com/gerosalesc/openvpn3-kde-nm/blob/main/CHANGELOG.m
 nm-openvpn3-service = "openvpn3_kde_nm.nm_vpn_service:main"
 openvpn3-kde-sync = "openvpn3_kde_nm.session_watcher:main"
 openvpn3-kde-cli = "openvpn3_kde_nm.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["openvpn3_kde_nm*"]
+
+[tool.setuptools.package-data]
+openvpn3_kde_nm = ["data/*"]

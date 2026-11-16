@@ -21,6 +21,10 @@ from openvpn3_kde_nm.config_sync import (  # noqa: E402
     open_user_dbus_system_bus,
     sync_all_profiles,
 )
+from openvpn3_kde_nm.installer import (  # noqa: E402
+    install_integration,
+    uninstall_integration,
+)
 from openvpn3_kde_nm.nm_vpn_service import LOG_FILE, ROOT_LOG_FILE  # noqa: E402
 from openvpn3_kde_nm.session_watcher import is_nm_openvpn3_plugin_installed  # noqa: E402
 
@@ -47,7 +51,7 @@ def cmd_status(_args: argparse.Namespace) -> int:
     print("=" * 78)
     print(
         f" NetworkManager OpenVPN 3 Plugin : "
-        f"{'INSTALLED (Native KDE Connect/Disconnect Active)' if plugin_ok else 'USER-SPACE MODE (Run ./install.sh for root NM hook)'}"
+        f"{'INSTALLED (Native KDE Connect/Disconnect Active)' if plugin_ok else 'USER-SPACE MODE (Run `openvpn3-kde-cli install` for root NM hook)'}"
     )
 
     # Check user systemd service
@@ -203,6 +207,17 @@ def cmd_sync(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_install(_args: argparse.Namespace) -> int:
+    rc = install_integration()
+    if rc == 0:
+        cmd_status(_args)
+    return rc
+
+
+def cmd_uninstall(_args: argparse.Namespace) -> int:
+    return uninstall_integration()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="openvpn3-kde-cli",
@@ -229,6 +244,8 @@ def main() -> int:
     p_import.add_argument("--replace", action="store_true", default=True, help="Replace existing profile with same name")
 
     sub.add_parser("sync", help="Synchronize all OpenVPN 3 profiles and KDE Connections")
+    sub.add_parser("install", help="Install NetworkManager plugin hook and systemd user daemon")
+    sub.add_parser("uninstall", help="Remove NetworkManager plugin hook and restore OpenVPN 2")
 
     args = parser.parse_args()
     if not args.command or args.command == "status":
@@ -241,6 +258,10 @@ def main() -> int:
         return cmd_import(args)
     if args.command == "sync":
         return cmd_sync(args)
+    if args.command == "install":
+        return cmd_install(args)
+    if args.command == "uninstall":
+        return cmd_uninstall(args)
     return 0
 
 
