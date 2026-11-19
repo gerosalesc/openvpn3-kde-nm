@@ -1,6 +1,6 @@
 # OpenVPN 3 KDE Connection Manager Integration (`openvpn3-kde-nm`)
 
-[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.1.1-blue.svg)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Platform: Linux / KDE Plasma](https://img.shields.io/badge/platform-Linux%20%7C%20KDE%20Plasma-informational.svg)](https://kde.org/)

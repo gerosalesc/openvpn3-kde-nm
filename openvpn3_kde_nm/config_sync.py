@@ -1,13 +1,16 @@
 """Synchronize OpenVPN 3 configurations with KDE Connection Manager (NetworkManager)."""
 
+import hashlib
 import json
 import os
 import pwd
+import time
 import uuid
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import dbus
+from dbus.mainloop.glib import DBusGMainLoop
 import gi
 import openvpn3
 
@@ -51,6 +54,34 @@ def save_synced_state(state: Dict[str, Dict[str, str]], uid: Optional[int] = Non
         pass
 
 
+def _wrap_bus_follow_owner(bus: dbus.SystemBus) -> dbus.SystemBus:
+    """
+    Wrap bus.get_object so well-known bus names default to follow_name_owner_changes=True.
+    This prevents openvpn3.SessionManager and ConfigurationManager from binding permanently
+    to a stale unique bus name (:1.xxx) when openvpn3-service-sessionmgr exits on idle.
+    """
+    orig_get_object = bus.get_object
+
+    def get_object_follow(
+        bus_name: str,
+        object_path: str,
+        introspect: bool = True,
+        follow_name_owner_changes: bool = True,
+        **kwargs,
+    ):
+        follow = follow_name_owner_changes and bool(bus_name) and not str(bus_name).startswith(":")
+        return orig_get_object(
+            bus_name,
+            object_path,
+            introspect=introspect,
+            follow_name_owner_changes=follow,
+            **kwargs,
+        )
+
+    bus.get_object = get_object_follow  # type: ignore[method-assign]
+    return bus
+
+
 def open_user_dbus_system_bus(target_uid: Optional[int] = None) -> dbus.SystemBus:
     """
     Open a private D-Bus SystemBus connection authenticated as the desktop user
@@ -61,6 +92,8 @@ def open_user_dbus_system_bus(target_uid: Optional[int] = None) -> dbus.SystemBu
     if target_uid == 0:
         target_uid = 1000
 
+    DBusGMainLoop(set_as_default=True)
+
     if os.getuid() == 0 and target_uid != 0:
         pw = pwd.getpwuid(target_uid)
         orig_euid = os.geteuid()
@@ -68,11 +101,39 @@ def open_user_dbus_system_bus(target_uid: Optional[int] = None) -> dbus.SystemBu
         try:
             os.setegid(pw.pw_gid)
             os.seteuid(pw.pw_uid)
-            return dbus.SystemBus(private=True)
+            bus = dbus.SystemBus(private=True)
         finally:
             os.seteuid(orig_euid)
             os.setegid(orig_egid)
-    return dbus.SystemBus(private=True)
+        return _wrap_bus_follow_owner(bus)
+    return _wrap_bus_follow_owner(dbus.SystemBus(private=True))
+
+
+def claim_webauth_url(url: str, target_uid: int = 1000) -> bool:
+    """
+    Atomically claim a WebAuth URL across nm-openvpn3-service and openvpn3-kde-sync
+    so the browser is opened exactly once per single-use WebAuth challenge URL.
+    """
+    now = time.time()
+    # Clean up old lock files (> 10 minutes old)
+    for old_lock in Path("/tmp").glob("openvpn3-webauth-*.lock"):
+        try:
+            if now - old_lock.stat().st_mtime > 600:
+                old_lock.unlink()
+        except OSError:
+            pass
+
+    url_hash = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
+    lock_path = Path(f"/tmp/openvpn3-webauth-{target_uid}-{url_hash}.lock")
+    try:
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        os.write(fd, f"{os.getpid()} {int(now)}\n".encode("utf-8"))
+        os.close(fd)
+        return True
+    except FileExistsError:
+        return False
+    except OSError:
+        return True
 
 
 def remove_openvpn3_profile(profile_name: str, target_uid: Optional[int] = None) -> bool:
@@ -245,12 +306,13 @@ def upsert_nm_vpn_connection(
             break
 
     if existing_conn is not None and not force_update:
-        # Check if legacy custom keys exist that need cleanup
+        # Check if legacy custom keys exist or vpn.timeout is still 0 (60s default)
         s_vpn = existing_conn.get_setting_vpn()
         has_legacy = s_vpn and (
             s_vpn.get_data_item("openvpn3-profile") is not None
             or s_vpn.get_data_item("openvpn3-setenv-username") is not None
             or s_vpn.get_data_item("persist-tun") is not None
+            or s_vpn.get_timeout() == 0
         )
         if not has_legacy:
             return existing_conn.get_uuid()
@@ -263,6 +325,7 @@ def upsert_nm_vpn_connection(
         existing_conn.remove_setting(NM.SettingVpn)
         s_vpn = NM.SettingVpn.new()
         s_vpn.set_property("service-type", "org.freedesktop.NetworkManager.openvpn")
+        s_vpn.set_property("timeout", 180)
         for k, v in vpn_data.items():
             s_vpn.add_data_item(k, v)
         existing_conn.add_setting(s_vpn)
@@ -304,6 +367,7 @@ def upsert_nm_vpn_connection(
 
         s_vpn = NM.SettingVpn.new()
         s_vpn.set_property("service-type", "org.freedesktop.NetworkManager.openvpn")
+        s_vpn.set_property("timeout", 180)
         for k, v in vpn_data.items():
             s_vpn.add_data_item(k, v)
         new_conn.add_setting(s_vpn)

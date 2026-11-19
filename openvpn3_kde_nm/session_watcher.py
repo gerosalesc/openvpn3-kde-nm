@@ -18,6 +18,8 @@ gi.require_version("NM", "1.0")
 from gi.repository import GLib, NM  # noqa: E402
 
 from openvpn3_kde_nm.config_sync import (  # noqa: E402
+    claim_webauth_url,
+    open_user_dbus_system_bus,
     remove_openvpn3_profile,
     sync_all_profiles,
 )
@@ -129,19 +131,24 @@ class MonitoredSession:
         if maj == StatusMajor.SESSION and min_st == StatusMinor.SESS_AUTH_URL:
             if message and message != self._last_auth_url:
                 self._last_auth_url = message
+                if not claim_webauth_url(message, target_uid=os.getuid()):
+                    log_msg(
+                        f"WebAuth URL for '{self.config_name}' already claimed by NM service; skipping duplicate open"
+                    )
+                    return
                 log_msg(f"Opening WebAuth URL for '{self.config_name}': {message}")
                 send_kde_notification(
                     f"OpenVPN 3 Authentication: {self.config_name}",
                     f"Opening browser for SSO login:\n{message}",
                 )
                 try:
-                    webbrowser.open_new(message)
-                except Exception:
                     subprocess.Popen(
                         ["xdg-open", message],
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
                     )
+                except Exception:
+                    webbrowser.open_new(message)
         elif maj == StatusMajor.CONNECTION and min_st == StatusMinor.CONN_CONNECTED:
             if not self._connected_notified:
                 self._connected_notified = True
@@ -174,7 +181,7 @@ class KdeOpenVpn3SyncDaemon:
 
     def __init__(self) -> None:
         DBusGMainLoop(set_as_default=True)
-        self.bus = dbus.SystemBus()
+        self.bus = open_user_dbus_system_bus()
         self.sessmgr = openvpn3.SessionManager(self.bus)
         self.cfgmgr = openvpn3.ConfigurationManager(self.bus)
         self.nm_client = NM.Client.new(None)
@@ -189,8 +196,15 @@ class KdeOpenVpn3SyncDaemon:
         except Exception as exc:
             log_msg(f"Initial profile sync error: {exc}")
 
-        # Subscribe to OpenVPN 3 SessionManager events
-        self.sessmgr.SessionManagerCallback(self._on_session_mgr_event)
+        # Subscribe to OpenVPN 3 SessionManager events with bus_name=None so signal subscription
+        # permanently survives openvpn3-service-sessionmgr idle shutdowns and restarts.
+        self.bus.add_signal_receiver(
+            self._on_raw_session_mgr_event,
+            signal_name="SessionManagerEvent",
+            dbus_interface="net.openvpn.v3.sessions",
+            bus_name=None,
+            path="/net/openvpn/v3/sessions",
+        )
 
         # Register existing OpenVPN 3 sessions
         for sess in self.sessmgr.FetchAvailableSessions():
@@ -214,18 +228,19 @@ class KdeOpenVpn3SyncDaemon:
         except Exception as exc:
             log_msg(f"Failed to register session {path}: {exc}")
 
-    def _on_session_mgr_event(self, event: object) -> None:
-        path = str(event.GetPath())  # type: ignore[attr-defined]
-        ev_type = event.GetType()  # type: ignore[attr-defined]
-        owner = event.GetOwner()  # type: ignore[attr-defined]
-        log_msg(f"SessionManagerEvent: {ev_type.name} path={path} owner={owner}")
-
-        if ev_type == SessionManagerEventType.SESS_CREATED:
-            GLib.timeout_add(300, lambda: (self._register_session(path), False)[1])
-        elif ev_type == SessionManagerEventType.SESS_DESTROYED:
-            mon = self.sessions.pop(path, None)
-            if mon:
-                mon.stop()
+    def _on_raw_session_mgr_event(self, path: object, evtype: int, owner: int) -> None:
+        try:
+            spath = str(path)
+            ev_type = SessionManagerEventType(int(evtype))
+            log_msg(f"SessionManagerEvent: {ev_type.name} path={spath} owner={int(owner)}")
+            if ev_type == SessionManagerEventType.SESS_CREATED:
+                GLib.timeout_add(250, lambda: (self._register_session(spath), False)[1])
+            elif ev_type == SessionManagerEventType.SESS_DESTROYED:
+                mon = self.sessions.pop(spath, None)
+                if mon:
+                    mon.stop()
+        except Exception as exc:
+            log_msg(f"Error handling raw SessionManagerEvent ({path}, {evtype}, {owner}): {exc}")
 
     def ensure_nm_connection_active(self, profile_name: str) -> None:
         """
@@ -340,12 +355,15 @@ class KdeOpenVpn3SyncDaemon:
         try:
             sync_all_profiles()
             for sess in self.sessmgr.FetchAvailableSessions():
+                spath = str(sess.GetPath())
+                if spath not in self.sessions:
+                    self._register_session(spath)
                 st = sess.GetStatus()
                 if st["major"] == StatusMajor.CONNECTION and st["minor"] == StatusMinor.CONN_CONNECTED:
                     cname = str(sess.GetProperty("config_name"))
                     self.ensure_nm_connection_active(cname)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_msg(f"Periodic sync note: {exc}")
         return True
 
 

@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-11-19
+
+### Fixed
+- **Survive `openvpn3-service-sessionmgr` & `configmgr` Idle Restarts**:
+  - Wrapped `dbus.SystemBus.get_object` with `follow_name_owner_changes=True` in `open_user_dbus_system_bus()` and subscribed to `SessionManagerEvent` with `bus_name=None` in `session_watcher.py` so `openvpn3-kde-sync.service` never loses its D-Bus signal subscription or binds to a stale unique bus name (`:1.xxx`) after OpenVPN 3 background services shut down on idle.
+- **Escape `NetworkManager.service`'s `ProtectHome=read-only` Sandbox for WebAuth**:
+  - Updated `open_user_browser()` in `nm_vpn_service.py` to launch WebAuth SSO browser tabs via `systemd-run --user --collect -p KillMode=none xdg-open <url>` (with fallback to `org.freedesktop.portal.OpenURI`) and send KDE notifications directly over the user's Session D-Bus (`unix:path=/run/user/<uid>/bus`) instead of `runuser`.
+- **Cross-Daemon WebAuth Deduplication & Extended VPN Connect Timeout**:
+  - Added atomic WebAuth URL lock (`claim_webauth_url`) across `nm-openvpn3-service` and `openvpn3-kde-sync.service` so single-use WebAuth challenge URLs are opened exactly once.
+  - Set `vpn.timeout = 180` seconds on NetworkManager VPN profiles to allow sufficient time for interactive SSO/MFA logins.
+
 ## [1.1.0] - 2026-11-16
 
 ### Added

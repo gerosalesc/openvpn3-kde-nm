@@ -24,6 +24,7 @@ gi.require_version("NM", "1.0")
 from gi.repository import GLib, NM  # noqa: E402
 
 from openvpn3_kde_nm.config_sync import (  # noqa: E402
+    claim_webauth_url,
     ensure_openvpn3_config,
     open_user_dbus_system_bus,
 )
@@ -144,53 +145,101 @@ def get_tun_network_details(dev_name: str) -> Dict[str, object]:
     return details
 
 
+def _open_user_session_bus(target_uid: int = 1000) -> dbus.bus.BusConnection:
+    """Connect to the desktop user's session D-Bus (/run/user/<uid>/bus)."""
+    pw = pwd.getpwuid(target_uid)
+    dbus_addr = f"unix:path=/run/user/{target_uid}/bus"
+    if os.getuid() == 0 and target_uid != 0:
+        orig_euid = os.geteuid()
+        orig_egid = os.getegid()
+        try:
+            os.setegid(pw.pw_gid)
+            os.seteuid(pw.pw_uid)
+            return dbus.bus.BusConnection(dbus_addr)
+        finally:
+            os.seteuid(orig_euid)
+            os.setegid(orig_egid)
+    return dbus.bus.BusConnection(dbus_addr)
+
+
 def open_user_browser(url: str, target_uid: int = 1000) -> None:
-    """Open a WebAuth URL in the desktop user's browser and send a desktop notification."""
+    """
+    Open a WebAuth URL in the desktop user's browser and send a KDE notification.
+    Uses the user's session D-Bus and systemd --user / xdg-desktop-portal so that
+    the browser runs outside NetworkManager.service's ProtectHome=read-only sandbox.
+    """
+    if not claim_webauth_url(url, target_uid=target_uid):
+        log_msg(f"WebAuth URL already claimed by user sync daemon; skipping duplicate open: {url}")
+        return
+
     log_msg(f"WebAuth required! Opening URL for UID {target_uid}: {url}")
     try:
         pw = pwd.getpwuid(target_uid)
         runtime_dir = f"/run/user/{target_uid}"
         dbus_addr = f"unix:path={runtime_dir}/bus"
-        env = os.environ.copy()
-        env.update({
+
+        # 1. Send KDE notification directly via user's session D-Bus
+        sbus = None
+        try:
+            sbus = _open_user_session_bus(target_uid)
+            notif_obj = sbus.get_object(
+                "org.freedesktop.Notifications", "/org/freedesktop/Notifications"
+            )
+            notify = notif_obj.get_dbus_method("Notify", "org.freedesktop.Notifications")
+            notify(
+                "OpenVPN 3 (KDE Connection Manager)",
+                0,
+                "network-vpn",
+                "OpenVPN 3 Web Authentication Required",
+                f"Opening browser to complete authentication:\n{url}",
+                [],
+                {},
+                8000,
+            )
+        except Exception as n_exc:
+            log_msg(f"Session D-Bus notification note: {n_exc}")
+
+        # 2. Launch browser via systemd --user (escapes NetworkManager's ProtectHome=read-only namespace)
+        env = {
             "HOME": pw.pw_dir,
             "USER": pw.pw_name,
             "LOGNAME": pw.pw_name,
-            "DISPLAY": env.get("DISPLAY", ":0"),
+            "PATH": "/usr/local/bin:/usr/bin:/bin",
+            "DISPLAY": os.environ.get("DISPLAY", ":0"),
             "XDG_RUNTIME_DIR": runtime_dir,
             "DBUS_SESSION_BUS_ADDRESS": dbus_addr,
-        })
+        }
         xauth = Path(pw.pw_dir) / ".Xauthority"
         if xauth.is_file():
             env["XAUTHORITY"] = str(xauth)
 
-        # Send KDE notification
-        subprocess.Popen(
-            [
-                "runuser",
-                "-u",
-                pw.pw_name,
-                "--",
-                "notify-send",
-                "-a",
-                "OpenVPN 3 (KDE Connection Manager)",
-                "-i",
-                "network-vpn",
-                "OpenVPN 3 Web Authentication Required",
-                f"Opening browser to complete authentication:\n{url}",
-            ],
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        run_kwargs = {}
+        if os.getuid() == 0 and target_uid != 0:
+            run_kwargs["user"] = pw.pw_uid
+            run_kwargs["group"] = pw.pw_gid
 
-        # Open browser
-        subprocess.Popen(
-            ["runuser", "-u", pw.pw_name, "--", "xdg-open", url],
+        proc = subprocess.run(
+            ["systemd-run", "--user", "--collect", "-p", "KillMode=none", "xdg-open", url],
             env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+            **run_kwargs,
         )
+        if proc.returncode == 0:
+            log_msg(f"Launched WebAuth browser via systemd --user: {proc.stderr.strip()}")
+            return
+
+        log_msg(f"systemd-run --user returned {proc.returncode} ({proc.stderr.strip()}); trying portal OpenURI")
+        if sbus is None:
+            sbus = _open_user_session_bus(target_uid)
+        portal_obj = sbus.get_object(
+            "org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop"
+        )
+        open_uri = portal_obj.get_dbus_method("OpenURI", "org.freedesktop.portal.OpenURI")
+        open_uri("", url, dbus.Dictionary({}, signature="sv"))
+        log_msg("Launched WebAuth browser via org.freedesktop.portal.OpenURI")
     except Exception as exc:
         log_msg(f"Failed to launch browser for WebAuth: {exc}")
 
