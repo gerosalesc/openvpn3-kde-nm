@@ -1,0 +1,25 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    remove|deconfigure)
+        if command -v py3clean >/dev/null 2>&1; then
+            py3clean -p openvpn3-kde-nm || true
+        fi
+        /usr/share/openvpn3-kde-nm/nm-hook.sh disable-user-service || true
+        /usr/share/openvpn3-kde-nm/nm-hook.sh restore
+        ;;
+    upgrade)
+        if command -v py3clean >/dev/null 2>&1; then
+            py3clean -p openvpn3-kde-nm || true
+        fi
+        ;;
+    failed-upgrade)
+        ;;
+    *)
+        echo "prerm called with unknown argument '$1'" >&2
+        exit 1
+        ;;
+esac
+
+exit 0

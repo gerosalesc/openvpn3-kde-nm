@@ -48,6 +48,42 @@ supports-hints=true
 """
 
 
+SYSTEM_NM_HOOK = Path("/usr/share/openvpn3-kde-nm/nm-hook.sh")
+NM_SERVICE_NAME_FILE = Path("/usr/lib/NetworkManager/VPN/nm-openvpn-service.name")
+
+
+def _is_system_package_install() -> bool:
+    """Return True when running from a system distro package (.deb / Arch .pkg.tar.zst)."""
+    pkg_path = str(Path(__file__).resolve())
+    return SYSTEM_NM_HOOK.is_file() and (
+        pkg_path.startswith("/usr/lib/python")
+        or pkg_path.startswith("/usr/share/openvpn3-kde-nm")
+    )
+
+
+def _detect_package_uninstall_hint() -> str:
+    """Return the native package-manager removal command for the current distro."""
+    if shutil.which("dpkg-query"):
+        proc = subprocess.run(
+            ["dpkg-query", "-W", "-f=${Status}", "openvpn3-kde-nm"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if proc.returncode == 0 and "installed" in proc.stdout:
+            return "sudo apt remove openvpn3-kde-nm"
+    if shutil.which("pacman"):
+        proc = subprocess.run(
+            ["pacman", "-Q", "openvpn3-kde-nm"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if proc.returncode == 0:
+            return "sudo pacman -R openvpn3-kde-nm"
+    return "your distribution's package manager"
+
+
 def _resolve_target_user() -> pwd.struct_passwd:
     """Resolve the desktop user even when running under sudo."""
     sudo_user = os.environ.get("SUDO_USER")
@@ -138,6 +174,41 @@ def install_integration(skip_sync: bool = False) -> int:
     user_home = Path(pw.pw_dir)
     pkg_dir = Path(__file__).resolve().parent
 
+    if _is_system_package_install():
+        print("Detected native system package installation of openvpn3-kde-nm.")
+        if not skip_sync:
+            print("[1/3] Synchronizing existing OpenVPN 3 profiles with KDE Connections...")
+            try:
+                synced = sync_all_profiles(target_uid=pw.pw_uid)
+                print(f"Synchronized {len(synced)} profile(s) with KDE Connection Manager.")
+            except Exception as exc:
+                print(f"Warning: profile sync failed ({exc}); continuing.")
+
+        print("[2/3] Verifying NetworkManager OpenVPN 3 service plugin hook...")
+        hook_active = False
+        try:
+            if NM_SERVICE_NAME_FILE.is_file():
+                hook_active = "nm-openvpn3-service" in NM_SERVICE_NAME_FILE.read_text(encoding="utf-8")
+        except OSError:
+            pass
+        if not hook_active:
+            _run_privileged_script(f"{shlex.quote(str(SYSTEM_NM_HOOK))} apply\n", "install")
+
+        print("[3/3] Enabling and starting openvpn3-kde-sync.service for current user...")
+        if os.geteuid() != 0:
+            subprocess.run(["systemctl", "--user", "daemon-reload"], check=False)
+            subprocess.run(
+                ["systemctl", "--user", "enable", "--now", "openvpn3-kde-sync.service"],
+                check=False,
+            )
+            subprocess.run(
+                ["systemctl", "--user", "restart", "openvpn3-kde-sync.service"],
+                check=False,
+            )
+            time.sleep(2)
+        print("System package integration verified.")
+        return 0
+
     print("[1/4] Configuring systemd user service...")
     exec_start = _resolve_sync_exec(user_home)
     service_text = _load_service_template().format(exec_start=exec_start)
@@ -222,6 +293,15 @@ killall nm-openvpn-service 2>/dev/null || true
 
 def uninstall_integration() -> int:
     """Disable user sync daemon and restore original OpenVPN 2 NetworkManager plugin."""
+    if _is_system_package_install():
+        cmd_hint = _detect_package_uninstall_hint()
+        print(
+            "openvpn3-kde-nm is installed via a system package.\n"
+            f"Please uninstall it with `{cmd_hint}`, which automatically stops the sync "
+            "daemon and restores the original OpenVPN 2 NetworkManager plugin."
+        )
+        return 0
+
     pw = _resolve_target_user()
     user_home = Path(pw.pw_dir)
 

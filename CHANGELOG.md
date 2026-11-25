@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-11-25
+
+### Added
+- **Native Debian / Ubuntu (`.deb`) Packaging (`packaging/debian/`, `packaging/build-deb.sh`)**:
+  - Builds a standards-compliant `openvpn3-kde-nm_<version>-1_all.deb` package targeting Debian 13 (Trixie), Ubuntu 26.04 LTS (Resolute), Ubuntu 24.04 LTS (Noble), and derivatives.
+  - Installs `openvpn3-kde-cli`, `openvpn3-kde-sync`, `/usr/libexec/nm-openvpn3-service`, and the global systemd user unit `/usr/lib/systemd/user/openvpn3-kde-sync.service`.
+  - Uses `dpkg-divert` and dpkg triggers via `packaging/common/nm-hook.sh` so the NetworkManager OpenVPN 3 hook survives `network-manager-openvpn` upgrades and cleanly restores OpenVPN 2 on removal.
+- **Native Arch Linux (`.pkg.tar.zst` + `PKGBUILD`) Packaging (`packaging/arch/`, `packaging/build-arch.sh`)**:
+  - Produces prebuilt `.pkg.tar.zst` packages alongside `PKGBUILD`, `openvpn3-kde-nm.install`, `.SRCINFO`, and AUR source tarballs.
+  - Installs a pacman ALPM hook (`/usr/share/libalpm/hooks/90-openvpn3-kde-nm.hook`) so the NetworkManager hook survives `networkmanager-openvpn` upgrades and restores OpenVPN 2 bit-for-bit on `pacman -R openvpn3-kde-nm`.
+- **Automated Release Packaging CI (`.github/workflows/release-packages.yml`) & Verification Suite (`packaging/tests/`)**:
+  - Automatically builds, lints (`lintian` / `namcap`), container-tests across Debian 13, Ubuntu 26.04, Ubuntu 24.04, and Arch Linux, generates `SHA256SUMS.txt`, and attaches all distro packages to GitHub Releases.
+
+### Changed
+- **System-Package Awareness in `openvpn3-kde-cli` (`openvpn3_kde_nm/installer.py`)**:
+  - Added `_is_system_package_install()` and `_detect_package_uninstall_hint()` so `openvpn3-kde-cli install` verifies and syncs system-packaged installs without overwriting package-managed files, and `openvpn3-kde-cli uninstall` directs users to `apt remove` / `pacman -R`.
+- Updated `README.md` with Debian/Ubuntu (`.deb`) and Arch Linux (`.pkg.tar.zst` / `PKGBUILD`) installation and uninstallation instructions, and ignored local package build outputs (`out/`, `*.deb`, `*.pkg.tar.*`) in `.gitignore`.
+
 ## [1.1.1] - 2026-11-19
 
 ### Fixed

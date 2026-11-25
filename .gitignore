@@ -8,6 +8,7 @@ __pycache__/
 build/
 develop-eggs/
 dist/
+out/
 downloads/
 eggs/
 .eggs/
@@ -18,6 +19,8 @@ sdist/
 var/
 wheels/
 *.egg-info/
+*.deb
+*.pkg.tar.*
 .installed.cfg
 *.egg
 

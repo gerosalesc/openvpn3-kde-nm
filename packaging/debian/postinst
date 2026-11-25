@@ -1,0 +1,23 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    configure)
+        if command -v py3compile >/dev/null 2>&1; then
+            py3compile -p openvpn3-kde-nm
+        fi
+        /usr/share/openvpn3-kde-nm/nm-hook.sh apply
+        /usr/share/openvpn3-kde-nm/nm-hook.sh enable-user-service
+        ;;
+    triggered)
+        /usr/share/openvpn3-kde-nm/nm-hook.sh apply
+        ;;
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+    *)
+        echo "postinst called with unknown argument '$1'" >&2
+        exit 1
+        ;;
+esac
+
+exit 0

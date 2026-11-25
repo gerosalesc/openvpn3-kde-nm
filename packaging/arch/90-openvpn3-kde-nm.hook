@@ -1,0 +1,10 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = networkmanager-openvpn
+
+[Action]
+Description = Re-applying OpenVPN 3 NetworkManager plugin hook...
+When = PostTransaction
+Exec = /usr/share/openvpn3-kde-nm/nm-hook.sh apply

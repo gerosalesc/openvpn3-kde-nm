@@ -1,0 +1,229 @@
+name: Build & Publish Linux Distro Packages
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Optional version override for dry-run builds (defaults to pyproject.toml)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Prepare release metadata and wheel
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag_name: ${{ steps.meta.outputs.tag_name }}
+      is_release: ${{ steps.meta.outputs.is_release }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Resolve and validate package version
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYPROJECT_VER="$(python3 -c '
+          import re, pathlib
+          text = pathlib.Path("pyproject.toml").read_text(encoding="utf-8")
+          m = re.search(r"^version\s*=\s*\"([^\"]+)\"", text, re.M)
+          if not m:
+              raise SystemExit("Could not parse version from pyproject.toml")
+          print(m.group(1))
+          ')"
+
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAG_NAME="${{ github.event.release.tag_name }}"
+            VERSION="${TAG_NAME#v}"
+            IS_RELEASE="true"
+            if [ "$VERSION" != "$PYPROJECT_VER" ]; then
+              echo "Error: Release tag '${TAG_NAME}' (${VERSION}) does not match pyproject.toml version (${PYPROJECT_VER})." >&2
+              exit 1
+            fi
+          else
+            INPUT_VER="${{ inputs.version }}"
+            VERSION="${INPUT_VER:-$PYPROJECT_VER}"
+            VERSION="${VERSION#v}"
+            TAG_NAME="v${VERSION}"
+            IS_RELEASE="false"
+          fi
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag_name=${TAG_NAME}" >> "$GITHUB_OUTPUT"
+          echo "is_release=${IS_RELEASE}" >> "$GITHUB_OUTPUT"
+          echo "Resolved package version=${VERSION}, tag=${TAG_NAME}, is_release=${IS_RELEASE}"
+
+      - name: Build canonical Python wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-wheel
+          path: dist/*.whl
+
+  build-deb:
+    name: Build Debian / Ubuntu (.deb)
+    needs: prepare
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Python wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: python-wheel
+          path: wheel-dist/
+
+      - name: Build .deb package
+        run: |
+          WHEEL_FILE="$(find wheel-dist -maxdepth 1 -name '*.whl' | head -n 1)"
+          bash packaging/build-deb.sh \
+            --version "${{ needs.prepare.outputs.version }}" \
+            --wheel "$WHEEL_FILE" \
+            --output-dir out/deb
+
+      - name: Inspect and lint .deb package
+        run: |
+          DEB_FILE="$(find out/deb -maxdepth 1 -name '*.deb' | head -n 1)"
+          dpkg-deb -I "$DEB_FILE"
+          dpkg-deb -c "$DEB_FILE"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq lintian
+          lintian --fail-on error --no-tag-display-limit "$DEB_FILE"
+
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-package
+          path: out/deb/*.deb
+
+  test-deb:
+    name: Test .deb on ${{ matrix.name }}
+    needs: [prepare, build-deb]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: "Debian 13 (Trixie - Latest Stable)"
+            image: "debian:trixie"
+          - name: "Ubuntu 26.04 LTS (Resolute - Latest LTS)"
+            image: "ubuntu:26.04"
+          - name: "Ubuntu 24.04 LTS (Noble)"
+            image: "ubuntu:24.04"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download .deb artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: deb-package
+          path: out/deb/
+
+      - name: Verify install, hook survival, and uninstall inside ${{ matrix.image }}
+        run: |
+          DEB_FILE="$(basename "$(find out/deb -maxdepth 1 -name '*.deb' | head -n 1)")"
+          docker run --rm \
+            -v "${PWD}:/work:ro" \
+            "${{ matrix.image }}" \
+            bash /work/packaging/tests/test-deb.sh "/work/out/deb/${DEB_FILE}" "${{ needs.prepare.outputs.version }}"
+
+  build-and-test-arch:
+    name: Build & Test Arch Linux (.pkg.tar.zst + PKGBUILD)
+    needs: prepare
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Arch Linux package inside archlinux:latest
+        run: |
+          mkdir -p out/arch
+          SOURCE_MODE="${{ needs.prepare.outputs.is_release == 'true' && 'github' || 'local' }}"
+          docker run --rm \
+            -v "${PWD}:/work" \
+            archlinux:latest \
+            bash -euo pipefail -c '
+              pacman -Syu --noconfirm --needed \
+                base-devel git curl python python-build python-installer python-setuptools python-wheel namcap
+              /work/packaging/build-arch.sh \
+                --version "'"${{ needs.prepare.outputs.version }}"'" \
+                --repo "'"${{ github.repository }}"'" \
+                --tag "'"${{ needs.prepare.outputs.tag_name }}"'" \
+                --source-mode "'"${SOURCE_MODE}"'" \
+                --output-dir /work/out/arch
+            '
+
+      - name: Verify install, ALPM hook survival, and uninstall inside clean archlinux:latest
+        run: |
+          PKG_FILE="$(basename "$(find out/arch -maxdepth 1 -name '*.pkg.tar.*' | head -n 1)")"
+          docker run --rm \
+            -v "${PWD}:/work:ro" \
+            archlinux:latest \
+            bash /work/packaging/tests/test-arch.sh "/work/out/arch/${PKG_FILE}" "${{ needs.prepare.outputs.version }}"
+
+      - name: Upload Arch Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: arch-package
+          path: out/arch/*
+
+  publish-release-assets:
+    name: Attach installers to GitHub Release
+    needs: [prepare, build-deb, test-deb, build-and-test-arch]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download Debian/Ubuntu package
+        uses: actions/download-artifact@v4
+        with:
+          name: deb-package
+          path: release-assets/
+
+      - name: Download Arch Linux package and PKGBUILD files
+        uses: actions/download-artifact@v4
+        with:
+          name: arch-package
+          path: release-assets/
+
+      - name: Generate SHA256SUMS.txt
+        run: |
+          cd release-assets
+          find . -maxdepth 1 -type f ! -name 'SHA256SUMS.txt' -printf '%f\n' | LC_ALL=C sort | xargs sha256sum > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Upload combined workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-distro-installers
+          path: release-assets/
+
+      - name: Attach packages to GitHub Release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ needs.prepare.outputs.tag_name }}" release-assets/* --clobber

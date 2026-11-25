@@ -1,0 +1,20 @@
+post_install() {
+    /usr/share/openvpn3-kde-nm/nm-hook.sh apply
+    /usr/share/openvpn3-kde-nm/nm-hook.sh enable-user-service
+    cat <<'EOF'
+==> openvpn3-kde-nm installed:
+    * NetworkManager OpenVPN service plugin hooked to /usr/lib/nm-openvpn3-service.
+    * User sync daemon (openvpn3-kde-sync.service) enabled globally.
+    * Run `openvpn3-kde-cli status` as your desktop user to verify profile sync.
+EOF
+}
+
+post_upgrade() {
+    /usr/share/openvpn3-kde-nm/nm-hook.sh apply
+    /usr/share/openvpn3-kde-nm/nm-hook.sh enable-user-service
+}
+
+pre_remove() {
+    /usr/share/openvpn3-kde-nm/nm-hook.sh disable-user-service || true
+    /usr/share/openvpn3-kde-nm/nm-hook.sh restore
+}

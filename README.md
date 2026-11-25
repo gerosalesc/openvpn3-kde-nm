@@ -1,6 +1,6 @@
 # OpenVPN 3 KDE Connection Manager Integration (`openvpn3-kde-nm`)
 
-[![Version](https://img.shields.io/badge/version-1.1.1-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Platform: Linux / KDE Plasma](https://img.shields.io/badge/platform-Linux%20%7C%20KDE%20Plasma-informational.svg)](https://kde.org/)
@@ -96,7 +96,43 @@ flowchart TB
 
 ## Installation
 
-### Option 1: Install from PyPI (via `pipx`)
+Prebuilt native packages for **Debian / Ubuntu (`.deb`)** and **Arch Linux (`.pkg.tar.zst` + `PKGBUILD`)** are automatically built, tested, and attached to every [GitHub Release](https://github.com/gerosalesc/openvpn3-kde-nm/releases).
+
+### Option 1: Debian / Ubuntu (`.deb` Package — Recommended)
+
+Supports **Debian 13 (Trixie)**, **Ubuntu 26.04 LTS (Resolute)**, **Ubuntu 24.04 LTS (Noble)**, Linux Mint 22.x, Kubuntu, and KDE Neon.
+
+Download `openvpn3-kde-nm_<version>-1_all.deb` from the latest [GitHub Release](https://github.com/gerosalesc/openvpn3-kde-nm/releases) and install it with `apt`:
+
+```bash
+sudo apt install ./openvpn3-kde-nm_<version>-1_all.deb
+```
+
+*(On Ubuntu 24.04 LTS / Debian 12 where `openvpn3-client` is not in the default distro archive, first enable the [official OpenVPN 3 APT repository](https://community.openvpn.net/openvpn/wiki/OpenVPN3Linux).)*
+
+The `.deb` package automatically:
+- Installs `openvpn3-kde-cli`, `openvpn3-kde-sync`, and `/usr/libexec/nm-openvpn3-service` system-wide.
+- Hooks NetworkManager cleanly via `dpkg-divert` (survives `network-manager-openvpn` upgrades and restores OpenVPN 2 cleanly on removal).
+- Enables and starts the global systemd user daemon `/usr/lib/systemd/user/openvpn3-kde-sync.service`.
+
+### Option 2: Arch Linux (`.pkg.tar.zst` or `PKGBUILD`)
+
+1. Install the `openvpn3` prerequisite from the AUR (e.g., `yay -S openvpn3`).
+2. Download the prebuilt package from the latest [GitHub Release](https://github.com/gerosalesc/openvpn3-kde-nm/releases) and install with `pacman`:
+
+```bash
+sudo pacman -U openvpn3-kde-nm-<version>-1-any.pkg.tar.zst
+```
+
+Or build directly from the release's `PKGBUILD` + `openvpn3-kde-nm.install` (or `openvpn3-kde-nm-<version>-aur-src.tar.gz`):
+
+```bash
+makepkg -si
+```
+
+The Arch package automatically installs a pacman ALPM hook (`/usr/share/libalpm/hooks/90-openvpn3-kde-nm.hook`) so the NetworkManager OpenVPN 3 hook survives `networkmanager-openvpn` upgrades and restores OpenVPN 2 cleanly on `pacman -R openvpn3-kde-nm`.
+
+### Option 3: Install from PyPI (via `pipx`)
 
 Because `openvpn3`, `gi` (PyGObject), and `dbus` come from system packages (`/usr/lib/python3/dist-packages/`), install with `--system-site-packages` and then run `openvpn3-kde-cli install` to register the systemd user daemon and NetworkManager root plugin hook:
 
@@ -105,7 +141,7 @@ pipx install --system-site-packages openvpn3-kde-nm
 openvpn3-kde-cli install
 ```
 
-### Option 2: Install from Source
+### Option 4: Install from Source
 
 ```bash
 git clone git@github.com:gerosalesc/openvpn3-kde-nm.git
@@ -164,14 +200,23 @@ openvpn3-kde-cli --version
 
 ## Uninstallation
 
-To remove the integration and restore the original OpenVPN 2 NetworkManager service:
+To remove the integration and cleanly restore the original OpenVPN 2 NetworkManager service:
 
-```bash
-openvpn3-kde-cli uninstall
-```
-*(Or `./uninstall.sh` from the source checkout.)*
-
-If installed via `pipx`, you can also remove the package afterwards with `pipx uninstall openvpn3-kde-nm`.
+- **Debian / Ubuntu (`.deb`)**:
+  ```bash
+  sudo apt remove openvpn3-kde-nm
+  ```
+- **Arch Linux**:
+  ```bash
+  sudo pacman -R openvpn3-kde-nm
+  ```
+- **PyPI (`pipx`) or Source**:
+  ```bash
+  openvpn3-kde-cli uninstall
+  # Optional if installed via pipx:
+  pipx uninstall openvpn3-kde-nm
+  ```
+  *(Or `./uninstall.sh` from the source checkout.)*
 
 ---
 
@@ -193,6 +238,13 @@ openvpn3-kde-nm/
 │   ├── nm_vpn_service.py            # NM.VpnServicePlugin D-Bus implementation
 │   ├── ovpn_parser.py               # .ovpn parser, PEM extractor, X.509 CN recovery
 │   └── session_watcher.py           # Session event watcher & WebAuth handler
+├── packaging/
+│   ├── arch/                        # Arch Linux PKGBUILD.in, .install, and ALPM hook
+│   ├── common/                      # Shared nm-hook.sh and system systemd user unit
+│   ├── debian/                      # Debian/Ubuntu control, maintainer scripts, triggers
+│   ├── tests/                       # Container and local package lifecycle tests
+│   ├── build-arch.sh                # Arch Linux package & AUR bundle builder
+│   └── build-deb.sh                 # Debian/Ubuntu .deb package builder
 ├── systemd/
 │   └── openvpn3-kde-sync.service    # systemd user unit
 ├── CHANGELOG.md

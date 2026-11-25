@@ -1,0 +1,15 @@
+Package: openvpn3-kde-nm
+Version: @DEB_VERSION@
+Architecture: all
+Maintainer: German Rosales <rosalesgermane@gmail.com>
+Section: net
+Priority: optional
+Homepage: https://github.com/gerosalesc/openvpn3-kde-nm
+Depends: python3 (>= 3.10), python3-gi, python3-dbus, gir1.2-nm-1.0, network-manager-openvpn, openvpn3-client | openvpn3, openssl, xdg-utils, iproute2, systemd
+Recommends: plasma-nm, libnotify-bin
+Installed-Size: @INSTALLED_SIZE@
+Description: KDE Connection Manager integration for OpenVPN 3 Linux
+ Bridges org.freedesktop.NetworkManager.openvpn to OpenVPN 3 Linux so
+ KDE System Settings -> Connections (plasma-nm) and the KDE Plasma Networks
+ system tray applet natively manage, connect, disconnect, and monitor
+ OpenVPN 3 profiles, including OpenVPN Cloud / CloudConnexa and WebAuth SSO.

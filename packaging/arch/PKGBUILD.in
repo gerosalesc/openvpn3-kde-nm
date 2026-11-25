@@ -1,0 +1,64 @@
+# Maintainer: German Rosales <rosalesgermane@gmail.com>
+pkgname=openvpn3-kde-nm
+pkgver=@PKGVER@
+pkgrel=@PKGREL@
+pkgdesc="Native KDE Connection Manager (plasma-nm / NetworkManager) integration for OpenVPN 3 Linux"
+arch=('any')
+url="https://github.com/@REPO@"
+license=('MIT')
+depends=(
+    'python'
+    'python-gobject'
+    'python-dbus'
+    'libnm'
+    'networkmanager'
+    'networkmanager-openvpn'
+    'openvpn3'
+    'openssl'
+    'xdg-utils'
+    'iproute2'
+    'systemd'
+)
+makedepends=(
+    'python-build'
+    'python-installer'
+    'python-setuptools'
+    'python-wheel'
+)
+optdepends=(
+    'plasma-nm: KDE Plasma Connection Manager UI and system tray integration'
+    'libnotify: fallback desktop notifications via notify-send'
+)
+install="${pkgname}.install"
+source=("@SOURCE_ENTRY@")
+sha256sums=('@SHA256SUM@')
+
+build() {
+    cd "${pkgname}-${pkgver}"
+    python -m build --wheel --no-isolation
+}
+
+package() {
+    cd "${pkgname}-${pkgver}"
+    python -m installer --destdir="${pkgdir}" dist/*.whl
+
+    # Place NetworkManager VPN plugin executable alongside Arch's /usr/lib/nm-openvpn-service
+    install -dm755 "${pkgdir}/usr/lib"
+    mv "${pkgdir}/usr/bin/nm-openvpn3-service" "${pkgdir}/usr/lib/nm-openvpn3-service"
+
+    # System-wide systemd user unit (globally enabled via .install script)
+    install -Dm644 packaging/common/openvpn3-kde-sync.service \
+        "${pkgdir}/usr/lib/systemd/user/openvpn3-kde-sync.service"
+
+    # NetworkManager hook helper and pacman ALPM hook
+    install -Dm755 packaging/common/nm-hook.sh \
+        "${pkgdir}/usr/share/${pkgname}/nm-hook.sh"
+    install -Dm644 packaging/arch/hook.conf \
+        "${pkgdir}/usr/share/${pkgname}/hook.conf"
+    install -Dm644 packaging/arch/90-openvpn3-kde-nm.hook \
+        "${pkgdir}/usr/share/libalpm/hooks/90-${pkgname}.hook"
+
+    # License and documentation
+    install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+    install -Dm644 README.md "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+}
