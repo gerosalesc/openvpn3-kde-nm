@@ -226,4 +226,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload "${{ needs.prepare.outputs.tag_name }}" release-assets/* --clobber
+          gh release upload "${{ needs.prepare.outputs.tag_name }}" release-assets/* \
+            --repo "${{ github.repository }}" \
+            --clobber
